@@ -40,8 +40,7 @@ class MachinedPlayer(Controller):
         super().__init__()
         self.step = 0
         self.prev_team_state = None # 前のターンのチーム状態を保存する変数
-        self.attacking_fort = None # 攻撃中の砦ID
-        self.target_fort = None # 攻撃目標の砦ID
+        self.isAttack = False # 砦が攻撃中かどうか
 
     def team_name(self) -> str:
         """
@@ -218,69 +217,50 @@ class MachinedPlayer(Controller):
         #                     print(f"    新規占領アップグレード計画: 要塞{fort_id} Lv{level}→{level+1} (優先度{priority}, 部隊{troops})")
 
 
-        # === 序盤戦略: ターゲット集中攻撃 ===
-        if (phase in ["early", "mid"]):
-            # 1. 攻撃継続中の処理
-            if self.attacking_fort is not None:
-                # ターゲットが既に自分のものになったかチェック
-                if self.target_fort is not None and state[self.target_fort][0] == 1:
-                    # 占領完了！攻撃モード解除
-                    self.attacking_fort = None
-                    self.target_fort = None
-                elif self.target_fort is not None:
-                    # まだ占領できていない -> 攻撃継続
-                    attacker = self.attacking_fort
-                    target = self.target_fort
-                    troops = state[attacker][3]
-                    
-                    # 兵力が少しでもあれば攻撃コマンドを出す
-                    if troops >= 1: 
-                        priority = 10000 # 絶対に実行させる優先度
-                        actions.append((priority, 1, attacker, target))
-                        if self.step < 500:
-                            print(f"    集中攻撃継続: {attacker}→{target} (残兵力{troops})")
-                else:
-                    self.attacking_fort = None
-
-            # 2. 新規攻撃の探索 (攻撃中でない場合のみ)
-            if self.attacking_fort is None:
-                for my_fort in my_fortresses:
-                    level = state[my_fort][2]
-                    troops = state[my_fort][3]
-                    max_troops = self.fortress_limit[level]
-                    
-                    # 攻撃開始条件: レベルMAX かつ 兵力90%以上
-                    if level == 5 and troops >= max_troops * 0.9:
-                        neighbors = state[my_fort][5]
-                        best_target = None
-                        best_score = -float('inf')
-                        
-                        for neighbor in neighbors:
-                            if state[neighbor][0] == 0: # 中立のみ対象
-                                neutral_troops = state[neighbor][3]
-                                
-                                # 評価関数
-                                score = 0
-                                if (neighbor in [4, 7] and my_fortress_num == 3):
-                                    score += 1000 # 重要拠点
-                                score -= neutral_troops # 敵が少ない方がいい
-                                
-                                # 兵力差チェック (1.5倍以上)
-                                if troops >= neutral_troops * 1.5:
-                                    if score > best_score:
-                                        best_score = score
-                                        best_target = neighbor
-                        
-                        if best_target is not None:
-                            # 攻撃開始！
-                            self.attacking_fort = my_fort
-                            self.target_fort = best_target
+        # === 序盤戦略: 十分な兵力が溜まってから攻撃 ===
+        if phase == "early":
+            for my_fort in my_fortresses:
+                level = state[my_fort][2]
+                troops = state[my_fort][3]
+                max_troops = self.fortress_limit[level]
+                
+                # 砦のレベルがマックスかつ収容量の90%以上溜まっている場合、収容量が10%になるまで攻撃
+                if ((level == 5) and ((troops >= max_troops * 0.9 and self.isAttack == False) or (troops >= 0.1 and self.isAttack == True))):
+                    neighbors = state[my_fort][5]
+                    self.isAttack = True
+                    for neighbor in neighbors:
+                        action_key = (1, my_fort, neighbor)
+                        # if state[neighbor][0] == 0 and action_key not in considered_actions:
+                        if state[neighbor][0] == 0:
+                            neutral_troops = state[neighbor][3]
                             
-                            priority = 10000
-                            actions.append((priority, 1, my_fort, best_target))
-                            if self.step < 500:
-                                print(f"    新規攻撃開始: {my_fort}→{best_target}")
-                            break # 1ターンに1つの攻撃開始で十分
+                            # 十分な兵力比があるか確認
+                            if troops >= neutral_troops * 1.9 and my_fortress_num == 3:
+                                if (neighbor in [4, 7] and my_fort not in [4, 7]):
+                                    importance = 100
+                                    already_attacking = False # とりあえず無視
+                                    
+                                    if not already_attacking:
+                                        priority = 150 + importance * 50
+                                        actions.append((priority, 1, my_fort, neighbor))
+                                        # considered_actions.add(action_key)
+                                        if self.step < 500:
+                                            print(f"    序盤攻撃計画: {my_fort}({troops})→{neighbor}({neutral_troops}) (優先度{priority})")
+                            elif (troops >= neutral_troops * 1.5):
+                                importance = self.FORTRESS_IMPORTANCE.get(neighbor, 5)
+                                ease = max(0, 30 - neutral_troops)
+                                # already_attacking = self.is_already_attacking(my_fort, neighbor, spawning_pawns, moving_pawns)
+                                already_attacking = False # とりあえず無視
+                                
+                                if not already_attacking:
+                                    priority = 150 + importance * 50 + ease
+                                    actions.append((priority, 1, my_fort, neighbor))
+                                    # considered_actions.add(action_key)
+                                    if self.step < 500:
+                                        print(f"    序盤攻撃計画: {my_fort}({troops})→{neighbor}({neutral_troops}) (優先度{priority})")
+                                
+                elif (troops <= 0.1 and self.isAttack == True):
+                    self.isAttack = False
 
         # if phase == "mid":
         #     for my_fort in my_fortresses:
@@ -317,8 +297,7 @@ class MachinedPlayer(Controller):
         # if
 
         # === 中立要塞への計算された攻撃（中盤以降）===
-        # if ((phase == "late") or (phase == "mid")):
-        if( phase in ["late"] ):
+        if ((phase == "late") or (phase == "mid")):
             for my_fort in my_fortresses:
                 if state[my_fort][3] >= 30:
                     neighbors = state[my_fort][5]
