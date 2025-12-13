@@ -1,3 +1,5 @@
+12/13：加筆修正ずみ
+
 Territory Conquering Game
 =========================
 この実験では、陣取りゲームのAIプレイヤーを開発します。 
@@ -8,7 +10,7 @@ Territory Conquering Game
 
 2. リポジトリをクローンし、必要なライブラリをインストール:
 ```bash
-git clone https://github.com/matt76k/tcg
+git clone -b latest https://github.com/akisaki-coco/tower_defence.git
 cd tcg
 uv sync
 ```
