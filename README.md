@@ -1,0 +1,11 @@
+<H1>タワーディフェンス型ゲーム</H1>
+<ol>
+  <li><H3>遊び方</H3>
+  ゲーム内容はtcg配下の<strong>direction.pdf</strong>に入ってるから、それを参照してね</li>
+  <li>
+    <H3>使用方法</H3>
+    リポジトリのクローン時はできるだけ<strong>latestブランチ</strong>からクローンしてください。<br>
+    また、変更可能なファイルは<strong>tcg/src/tcg/players配下のファイルのみ</strong>です。<br>
+    sampleファイルがあるので、それをコピーして改変してくださいね。<br>
+  </li>
+</ol>
