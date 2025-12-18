@@ -188,8 +188,8 @@ class MachinedPlayer(Controller):
         
         max_upgrade_level = {
             "early": 4,
-            "mid": 4,
-            "late": 4
+            "mid": 3,
+            "late": 2
         }[phase]
 
         # 中央の重要拠点は最優先でアップグレード
@@ -199,7 +199,8 @@ class MachinedPlayer(Controller):
                 troops = state[fort_id][3]
                 
                 if (state[fort_id][4] == -1 and 
-                    level < max_upgrade_level and
+                    (level < max_upgrade_level or my_soldiers > 800) and
+                    level < 5 and
                     troops >= self.fortress_limit[level] * 0.4):  # 40%で開始
                     priority = upgrade_priority_base + 50 + level * 10
                     actions.append((priority, 2, fort_id, 0))
@@ -219,7 +220,8 @@ class MachinedPlayer(Controller):
                 troops_threshold = self.fortress_limit[level] * (0.5 if phase == "early" else 0.5)
                 
                 if (state[my_fort][4] == -1 and 
-                    level < max_upgrade_level and
+                    (level < max_upgrade_level or my_soldiers > 800) and
+                    level < 5 and
                     troops >= troops_threshold):
                     priority = upgrade_priority_base + importance + level * 10 + enemy_neighbors * 8 + 50 # とりあえずアップグレードは高めに
                     # もし敵が近くにいないなら、アップグレードを更に優先
@@ -228,7 +230,7 @@ class MachinedPlayer(Controller):
                     for neighbor in neighbors:
                         if state[neighbor][0] == 2:
                             near_enemy = True
-                    if (near_enemy == False and my_soldiers > 800):
+                    if (near_enemy == False):
                         priority += 1000
                     actions.append((priority, 2, my_fort, 0)) 
                     # print("LAUNCH UPGRADE")
@@ -284,14 +286,18 @@ class MachinedPlayer(Controller):
                                 
                                 # 評価関数
                                 score = 0
+                                multiplier = 1.5
                                 if (neighbor in [4, 7] and my_fortress_num == 3):
                                     # 戦略的に重要拠点は4番目にとってほしい
                                     score += 1000 # 重要拠点
+                                    # 取れるならすぐに取ってほしい
+                                    if (my_soldiers > 100):
+                                        multiplier = 1.0
                                     print("IMPORTANT TARGET!")
                                 score -= neutral_troops # 敵が少ない方がいい
                                 
-                                # 兵力差チェック (1.2倍以上)
-                                if troops >= neutral_troops * 1.2:
+                                # 兵力差チェック (1.5倍以上)
+                                if troops >= neutral_troops * multiplier:
                                     if score > best_score:
                                         best_score = score
                                         best_target = neighbor
