@@ -1,10 +1,9 @@
 """
-Strict Victory Strategy
+Strategic Targeting Strategy (High Priority)
 
-「無駄死に」を完全に防ぐための戦略
-1. 攻撃は「確実に制圧できる（ダメージ > 敵兵数 + バッファ）」場合のみ許可。
-   「削り」目的の攻撃は、反撃のリスクがあるため禁止します。
-2. 敵が近くにいても、攻撃できない（勝てない）場合は、無理せずアップグレードに回します。
+1. 「兵士強化砦（Kind 1）」の取得優先度を極端に高く設定しました。
+   中立だろうが敵だろうが、見つけ次第（勝てるなら）最優先で取りに行きます。
+2. 兵站（バケツリレー）と溢れ防止機能は維持しています。
 """
 
 from tcg.config import fortress_limit
@@ -31,10 +30,15 @@ class Strategy:
             info = state[i]
             neighbors = info[5]
             
-            # 状況確認
+            # パラメータ取得
             has_enemy_neighbor = any(state[n][0] == 2 for n in neighbors)
             current_level = info[2]
             upgrade_cost = fortress_limit[current_level] // 2
+            max_pawns = fortress_limit[current_level]
+            current_pawns = info[3]
+            
+            # 溢れ判定
+            is_overflowing = current_pawns >= max_pawns * 0.9
             
             # 出撃可能な兵数（半分）
             sending_pawns = info[3] // 2
@@ -42,90 +46,94 @@ class Strategy:
             # 自分の攻撃力
             my_attack_power = self.get_fort_strength([0, info[1], 0, sending_pawns, 0, 0])
 
+
             # ========================================================
             # 1. 攻撃判定 (Attack Logic)
-            # 先に攻撃できるかチェックするが、基準を「激辛」にする
             # ========================================================
             best_target = None
-            best_score = 0
+            best_score = -999
 
-            if sending_pawns >= 3: # 最低3体はいないと動かない
+            if sending_pawns >= 3: 
                 for n in neighbors:
                     target = state[n]
                     target_team = target[0]
                     target_pawns = target[3]
+                    target_kind = target[1] # 0:普通, 1:強化
                     
-                    # 序盤の中央(4, 7)は絶対無視
+                    # 序盤の中央無視
                     if is_early_game and n in [4, 7] and target_team == 0:
                         continue
 
-                    # 【重要】物理的な兵数チェック（絶対条件）
-                    # 送る兵数が、敵の兵数より少なければ門前払い（相殺されるだけなので）
-                    if sending_pawns <= target_pawns:
-                        continue
-
-                    # 【重要】ダメージ計算（勝利条件）
-                    # 確実に制圧できるか？ (敵兵数 + マージン2体) を上回る必要がある
+                    # --- 勝てるかどうかの判定 ---
                     victory_threshold = target_pawns + 2.0
+                    if target_team == 2: victory_threshold += 3.0
                     
-                    # 敵(赤)の場合は、増援が来るリスクがあるのでさらに厳しく
-                    if target_team == 2:
-                        victory_threshold += 3.0
-
-                    # 攻撃力が足りないなら攻撃しない
-                    if my_attack_power <= victory_threshold:
+                    is_winnable = (sending_pawns > target_pawns) and (my_attack_power > victory_threshold)
+                    
+                    allow_attack = is_winnable
+                    if is_overflowing and target_team == 2:
+                        allow_attack = True 
+                    
+                    if not allow_attack:
                         continue
 
-                    # スコア計算
+                    # --- スコア計算 ---
                     score = 0
+                    
                     if target_team == 0: # 中立
                         score = 100 - target_pawns
                         if is_early_game and len(state[n][5]) >= 4: score -= 50
                     elif target_team == 2: # 敵
                         score = 200
-                        # 敵が手薄ならチャンス
                         if target_pawns < 5: score += 50
+                        if is_overflowing: score += 1000
+
+                    # ★★★ 修正ポイント: 強化砦への執着 ★★★
+                    if target_kind == 1:
+                        score += 300  # ボーナスを倍増 (150 -> 300)
+                        
+                        # 敵が持っている強化砦は、放置すると危険なのでさらに優先
+                        if target_team == 2:
+                            score += 100
 
                     if score > best_score:
                         best_score = score
                         best_target = n
 
-            # 攻撃ターゲットが見つかったら、それを候補に入れる
             if best_target is not None:
                 actions.append((best_score, 1, i, best_target))
-                # 攻撃できるなら、アップグレードは後回し（continueしない）
             
             # ========================================================
             # 2. アップグレード (Economy Logic)
-            # 攻撃する相手がいない、または勝てない場合
             # ========================================================
             if current_level < 5 and info[4] == -1:
-                # コストが足りているなら
                 if info[3] >= upgrade_cost:
-                    # 敵が近くにいないなら、即アップグレード（優先度 最高）
                     if not has_enemy_neighbor:
                         return 2, i, 0
-                    
-                    # 【追加】敵が近くにいても、攻撃できない＆兵が溢れそうならアップグレード
-                    # (座して死ぬよりは生産力を上げたほうがいい)
-                    elif info[3] >= fortress_limit[current_level] * 0.9:
-                        return 2, i, 0
+                    if is_overflowing and best_target is None:
+                         return 2, i, 0
                 
-                # 敵がいないなら、兵を貯めるためにここで終了（攻撃アクションを無効化）
-                if not has_enemy_neighbor:
+                if not has_enemy_neighbor and not is_overflowing:
                     continue
 
             # ========================================================
-            # 3. 兵站 (Logistics)
+            # 3. バケツリレー (Logistics)
             # ========================================================
-            if not has_enemy_neighbor and current_level == 5:
-                if info[3] > fortress_limit[5] * 0.2:
-                    for n in neighbors:
-                        if state[n][0] == 1: 
-                            if is_early_game and n in [4, 7]: continue
-                            if any(state[nn][0] == 2 for nn in state[n][5]):
-                                actions.append((50, 1, i, n))
-                                break
+            threshold = 0.9 if has_enemy_neighbor else 0.4
+            
+            if current_pawns > max_pawns * threshold:
+                for n in neighbors:
+                    if state[n][0] == 1: 
+                        if is_early_game and n in [4, 7]: continue
+                        
+                        if any(state[nn][0] == 2 for nn in state[n][5]):
+                            # 強化砦を取りに行くための移動なら優先度を上げる
+                            priority = 500 if is_overflowing else 60
+                            actions.append((priority, 1, i, n))
+                            break
+                        
+                        if is_overflowing:
+                            actions.append((300, 1, i, n))
 
         if actions:
             actions.sort(key=lambda x: x[0], reverse=True)

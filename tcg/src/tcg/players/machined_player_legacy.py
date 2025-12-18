@@ -14,7 +14,7 @@ from tcg.controller import Controller
 import random
 
 
-class MachinedPlayer(Controller):
+class MachinedPlayerLegacy(Controller):
     """
     テンプレートAIプレイヤー
 
@@ -51,7 +51,7 @@ class MachinedPlayer(Controller):
         Returns:
             str: プレイヤー名
         """
-        return "Machined Player"
+        return "Machined Player Legacy"
     
     def update(self, info) -> tuple[int, int, int]:
         """

@@ -1,6 +1,6 @@
 """Utility functions for the game."""
 
-from .config import swap_number_d, swap_number_l
+from .config import swap_number_d, swap_number_l, WIDTH, HEIGHT
 
 
 def Swap_team(team):
@@ -31,8 +31,8 @@ def flip_board_view(info):
             moving_pawns[i][1],
             swap_number_d[moving_pawns[i][2]],
             swap_number_d[moving_pawns[i][3]],
+            [WIDTH - moving_pawns[i][4][0], HEIGHT - moving_pawns[i][4][1]],
         ]
-        + moving_pawns[i][4:]
         for i in range(len(moving_pawns))
     ]
 
@@ -44,8 +44,8 @@ def flip_board_view(info):
             spawning_pawns[i][2],
             swap_number_d[spawning_pawns[i][3]],
             swap_number_d[spawning_pawns[i][4]],
+            [WIDTH - spawning_pawns[i][5][0], HEIGHT - spawning_pawns[i][5][1]],
         ]
-        + spawning_pawns[i][5:]
         for i in range(len(spawning_pawns))
     ]
 
