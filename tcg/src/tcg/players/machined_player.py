@@ -117,9 +117,9 @@ class MachinedPlayer(Controller):
 
         # ゲームフェーズの判定 (取得要塞数で判断)
         my_fortress_num = len(my_fortresses)
-        if my_fortress_num < 4:
+        if my_fortress_num < 3:
             phase = "early"
-        elif my_fortress_num < 6:
+        elif my_fortress_num < 4:
             phase = "mid"
         else:
             phase = "late"
@@ -187,9 +187,9 @@ class MachinedPlayer(Controller):
             upgrade_priority_base = 70
         
         max_upgrade_level = {
-            "early": 5,
+            "early": 4,
             "mid": 4,
-            "late": 3
+            "late": 4
         }[phase]
 
         # 中央の重要拠点は最優先でアップグレード
@@ -228,8 +228,8 @@ class MachinedPlayer(Controller):
                     for neighbor in neighbors:
                         if state[neighbor][0] == 2:
                             near_enemy = True
-                    if (near_enemy == False):
-                        priority += 500
+                    if (near_enemy == False and my_soldiers > 800):
+                        priority += 1000
                     actions.append((priority, 2, my_fort, 0)) 
                     # print("LAUNCH UPGRADE")
                     if self.step < 500:
@@ -275,7 +275,7 @@ class MachinedPlayer(Controller):
                     max_troops = self.fortress_limit[level]
                     
                     # 攻撃開始の口火を切る条件: レベルMAX かつ 兵力90%以上
-                    if (phase == "early" and level == 5 and troops >= max_troops * 0.9) or (phase == "mid" and level >=4 and troops >= max_troops * 0.9):
+                    if (phase == "early" and level == 4 and troops >= max_troops * 0.9) or (phase == "mid" and level >= 3 and troops >= max_troops * 0.9):
                         neighbors = state[my_fort][5]
                         
                         for neighbor in neighbors:
@@ -287,10 +287,11 @@ class MachinedPlayer(Controller):
                                 if (neighbor in [4, 7] and my_fortress_num == 3):
                                     # 戦略的に重要拠点は4番目にとってほしい
                                     score += 1000 # 重要拠点
+                                    print("IMPORTANT TARGET!")
                                 score -= neutral_troops # 敵が少ない方がいい
                                 
-                                # 兵力差チェック (1.5倍以上)
-                                if troops >= neutral_troops * 1.5:
+                                # 兵力差チェック (1.2倍以上)
+                                if troops >= neutral_troops * 1.2:
                                     if score > best_score:
                                         best_score = score
                                         best_target = neighbor
@@ -354,28 +355,28 @@ class MachinedPlayer(Controller):
         
         # if
 
-        # === 中立要塞への計算された攻撃（中盤以降）===
-        # if ((phase == "late") or (phase == "mid")):
-        if( phase in ["late"] ):
-            for my_fort in my_fortresses:
-                if state[my_fort][3] >= 30:
-                    neighbors = state[my_fort][5]
-                    for neighbor in neighbors:
-                        action_key = (1, my_fort, neighbor)
-                        # if state[neighbor][0] == 0 and action_key not in considered_actions:
-                        if state[neighbor][0] == 0:
-                            my_troops = state[my_fort][3]
-                            neutral_troops = state[neighbor][3]
-                            success_ratio = my_troops / max(neutral_troops, 1)
-                            success_threshold = 1.2 if my_soldiers > 1500 else 3.0
+        # # === 中立要塞への計算された攻撃（中盤以降）===
+        # # if ((phase == "late") or (phase == "mid")):
+        # if( phase in ["late"] ):
+        #     for my_fort in my_fortresses:
+        #         if state[my_fort][3] >= 30:
+        #             neighbors = state[my_fort][5]
+        #             for neighbor in neighbors:
+        #                 action_key = (1, my_fort, neighbor)
+        #                 # if state[neighbor][0] == 0 and action_key not in considered_actions:
+        #                 if state[neighbor][0] == 0:
+        #                     my_troops = state[my_fort][3]
+        #                     neutral_troops = state[neighbor][3]
+        #                     success_ratio = my_troops / max(neutral_troops, 1)
+        #                     success_threshold = 1.2 if my_soldiers > 1500 else 3.0
                             
-                            if success_ratio >= success_threshold:
-                                importance = self.FORTRESS_IMPORTANCE.get(neighbor, 5)
-                                priority = 120 + importance * 5 + int(success_ratio * 10)
-                                if neighbor in [4, 7]:
-                                    priority += 1000  # 重要拠点は更に優先
-                                actions.append((priority, 1, my_fort, neighbor))
-                                # considered_actions.add(action_key)
+        #                     if success_ratio >= success_threshold:
+        #                         importance = self.FORTRESS_IMPORTANCE.get(neighbor, 5)
+        #                         priority = 120 + importance * 5 + int(success_ratio * 10)
+        #                         if neighbor in [4, 7]:
+        #                             priority += 1000  # 重要拠点は更に優先
+        #                         actions.append((priority, 1, my_fort, neighbor))
+        #                         # considered_actions.add(action_key)
 
         # === 敵要塞への戦略的攻撃 ===
         for my_fort in my_fortresses:
@@ -396,7 +397,7 @@ class MachinedPlayer(Controller):
                         adjusted_enemy_strength = enemy_troops * defense_multiplier
                         success_ratio = my_troops / max(adjusted_enemy_strength, 1)
                         # 取られて間もない要塞なら問題なく攻撃を開始する
-                        success_threshold = 0.5 if (my_soldiers - enemy_soldiers) > 1000 else 3.0
+                        success_threshold = 0.5 if (my_soldiers > enemy_soldiers * 10) else 3.0
                         
                         if success_ratio >= success_threshold:  # 敵はより慎重に
                             importance = self.FORTRESS_IMPORTANCE.get(neighbor, 5)
