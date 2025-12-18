@@ -1,0 +1,23 @@
+my_team_id = team
+enemy_team_id = 2 if team == 1 else 1
+
+# 自分の総兵力
+my_soldiers = (
+    sum(int(s[3]) for s in state if s[0] == my_team_id) +
+    len([p for p in moving_pawns if p[0] == my_team_id]) +
+    sum(int(p[2]) for p in spawning_pawns if p[0] == my_team_id)
+)
+
+# 敵の総兵力
+enemy_soldiers = (
+    sum(int(s[3]) for s in state if s[0] == enemy_team_id) +
+    len([p for p in moving_pawns if p[0] == enemy_team_id]) +
+    sum(int(p[2]) for p in spawning_pawns if p[0] == enemy_team_id)
+)
+
+# 兵力差情報
+if self.step % 1000 == 0:
+    print(f"\n=== Step {self.step} ({phase}) ===")
+    print(f"自分の要塞数: {len(my_fortresses)}, 敵の要塞数: {len(enemy_fortresses)}, 中立: {len(neutral_fortresses)}")
+    print(f"全兵士数: {total_soldiers} (砦内: {total_in_forts}, 移動中: {total_moving}, 出撃待機: {total_spawning})")
+    print(f"自分の総兵力: {my_soldiers}, 敵の総兵力: {enemy_soldiers}")
