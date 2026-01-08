@@ -199,7 +199,7 @@ class MachinedPlayer(Controller):
                 troops = state[fort_id][3]
                 
                 if (state[fort_id][4] == -1 and 
-                    (level < max_upgrade_level or my_soldiers > 800) and
+                    (level < max_upgrade_level or my_soldiers > 400) and
                     level < 5 and
                     troops >= self.fortress_limit[level] * 0.4):  # 40%で開始
                     priority = upgrade_priority_base + 50 + level * 10
