@@ -54,7 +54,7 @@ class NewMachinedPlayer(Controller):
         """
         return "New Machined Player"
 
-    def execute_bucket_brigade(self, target_id, state, my_fortresses, actions):
+    def execute_bucket_brigade(self, target_id, state, my_fortresses, actions, priority_base=10000, troops_threshold=5, ignore_direct_neighbors=True):
         """
         ターゲットに向けてバケツリレーで兵士を輸送する
         Args:
@@ -62,6 +62,9 @@ class NewMachinedPlayer(Controller):
             state: ゲーム状態
             my_fortresses: 自軍の要塞リスト
             actions: 行動リスト (ここにコマンドを追加する)
+            priority_base: 優先度の基準値
+            troops_threshold: 移動を開始する最低兵力
+            ignore_direct_neighbors: ターゲットに隣接する要塞からの移動を除外するか
         """
         if target_id is None:
             return
@@ -86,12 +89,11 @@ class NewMachinedPlayer(Controller):
         for my_fort in my_fortresses:
             neighbors = state[my_fort][5]
             
-            # ターゲットに直接攻撃できる（隣接している）場合は、ここでは移動指示を出さない
-            # (一斉攻撃ロジックに任せる)
-            if target_id in neighbors:
+            # フラグがTrueなら、ターゲットに隣接している場合は移動指示を出さない (攻撃ロジック等に任せる)
+            if ignore_direct_neighbors and target_id in neighbors:
                 continue
 
-            # ターゲットに近づく方向の味方要塞を探す
+            # ターゲットに近づく方向の味方要塞を
             current_dist = dist_map[my_fort]
             best_next_hop = None
             min_dist = current_dist
@@ -106,8 +108,17 @@ class NewMachinedPlayer(Controller):
             # 移動実行
             if best_next_hop is not None:
                 troops = state[my_fort][3]
-                if troops >= 5: # ある程度たまったら送る
-                    priority = 10000 + troops # 攻撃よりは低いが、移動優先度は高め
+                level = state[my_fort][2]
+                max_troops = self.fortress_limit[level]
+                
+                # 溢れそうな場合は優先度を上げる (Smart Logistics)
+                overflow_bonus = 0
+                if max_troops > 0 and troops >= max_troops * 0.9:
+                    overflow_bonus = 300 # 溢れ防止はかなり重要
+
+                # しきい値チェック (溢れそうなときはしきい値無視)
+                if troops >= troops_threshold or overflow_bonus > 0:
+                    priority = priority_base + troops + overflow_bonus + random.uniform(0, 1)
                     actions.append((priority, 1, my_fort, best_next_hop))
                     # print(f"    バケツリレー: {my_fort}→{best_next_hop}")
     
@@ -176,8 +187,10 @@ class NewMachinedPlayer(Controller):
         my_fortress_num = len(my_fortresses)
         if my_fortress_num < 3:
             phase = "early"
-        elif my_fortress_num < 4:
+        elif my_fortress_num < 5:
             phase = "mid"
+        elif my_fortress_num < 7:
+            phase = "mid-late"
         else:
             phase = "late"
 
@@ -194,45 +207,75 @@ class NewMachinedPlayer(Controller):
             print(f"全兵士数: {total_soldiers} (砦内: {total_in_forts}, 移動中: {total_moving}, 出撃待機: {total_spawning})")
             print(f"自分の総兵力: {my_soldiers}, 敵の総兵力: {enemy_soldiers}")
 
-        # === 緊急防御: 最優先 ===
-        under_attack = {}
-        incoming_threats = {}
-        
+        # === 緊急防御: 改良版 (Concrete Defense + Bucket Brigade) ===
+        under_attack_info = {} # key: target_fort_id, value: {total_enemy: int, min_dist: float}
+        incoming_reinforcements = {} # key: target_fort_id, value: total_friendly_troops
+
+        # 1. 移動中の部隊を分析（敵の攻撃と、味方の援軍）
         for pawn in moving_pawns:
             pawn_team, kind, from_, to, pos = pawn
-            # pos がリストの場合に対応（例: [x, y]）
+            
+            # 距離計算
             if isinstance(pos, (list, tuple)):
-                # 進行度が別で保存されていないなら、距離計算は「ざっくり1」として扱うか、
-                # もしくは x,y から距離を近似して計算する
-                # ここでは安全のため固定値扱いにして、「エラーを出さずに動かす」ことを優先
-                distance = 1.0
+                dist = 1.0
             else:
-                distance = max(1.0, 100 - float(pos))
+                dist = max(1.0, 100 - float(pos))
 
+            # ケースA: 敵軍(2) -> 自軍(1) への攻撃
             if pawn_team == 2 and state[to][0] == 1:
-                if to not in under_attack:
-                    under_attack[to] = []
-                under_attack[to].append((from_, pos))
+                if to not in under_attack_info:
+                    under_attack_info[to] = {"total_enemy": 0, "min_dist": 999.0}
+                
+                under_attack_info[to]["total_enemy"] += kind
+                if dist < under_attack_info[to]["min_dist"]:
+                    under_attack_info[to]["min_dist"] = dist
+            
+            # ケースB: 自軍(1) -> 自軍(1) への移動（既存の援軍）
+            elif pawn_team == 1 and state[to][0] == 1:
+                incoming_reinforcements[to] = incoming_reinforcements.get(to, 0) + kind
 
-                threat = kind * 10 / distance
-                incoming_threats[to] = incoming_threats.get(to, 0) + threat
+        # 2. 防御アクションの生成
+        worst_target = None
+        max_shortage = 0
 
-        # 防御が必要な要塞への支援
-        for target_fort, threats in under_attack.items():
+        for target_fort, info in under_attack_info.items():
+            total_enemy_troops = info["total_enemy"]
+            min_dist = info["min_dist"] # 最も近い敵までの距離（緊急度の指標）
+            
             current_defenders = state[target_fort][3]
-            total_threat = incoming_threats.get(target_fort, 0)
+            already_coming = incoming_reinforcements.get(target_fort, 0)
+            
+            # 防衛に必要な兵力計算（敵総兵力の1.2倍を安全圏とする）
+            # 現在の兵力 + 既にや向かっている援軍 で足りているか？
+            needed_troops = (total_enemy_troops * 1.2) - (current_defenders + already_coming)
+            
+            # 兵力が不足している場合のみ援軍を要請
+            if needed_troops > 0:
+                # 最もピンチな要塞を記録
+                if needed_troops > max_shortage:
+                    max_shortage = needed_troops
+                    worst_target = target_fort
 
-            if current_defenders < total_threat * 1.2:
                 neighbors = state[target_fort][5]
                 for my_fort in neighbors:
-                    action_key = (1, my_fort, target_fort)
+                    # 援軍元として適切かチェック
+                    # 1. 自軍である
+                    # 2. 兵力が一定以上ある (最低でも5)
+                    # 3. 自身も攻撃されていない（under_attack_infoに含まれていないこと）
                     if (state[my_fort][0] == 1 and 
-                        state[my_fort][3] >= 5 
-                        # and action_key not in considered_actions
-                        ):
-                        priority = 200 + total_threat * 10
+                        state[my_fort][3] >= 5 and 
+                        my_fort not in under_attack_info): 
+                        
+                        urgency_bonus = 500 / max(1.0, min_dist * 0.1)
+                        priority = 200 + urgency_bonus + needed_troops
                         actions.append((priority, 1, my_fort, target_fort))
-                        # considered_actions.add(action_key)
+
+        # 3. 深刻な危機の場合、バケツリレーで遠方からも支援する
+        if worst_target is not None and max_shortage >= 15:
+             # バケツリレー関数を利用して、全軍に支援要請（優先度はbucket_brigade内で10000+で設定される）
+             self.execute_bucket_brigade(worst_target, state, my_fortresses, actions)
+             if self.step < 500:
+                 print(f"  防衛バケツリレー発動: ターゲット{worst_target} (不足{max_shortage:.1f})")
 
         # === アップグレード戦略（序盤最優先）===
         # 序盤は部隊を溜めるためにアップグレードを最優先
@@ -244,8 +287,9 @@ class NewMachinedPlayer(Controller):
             upgrade_priority_base = 70
         
         max_upgrade_level = {
-            "early": 4,
-            "mid": 3,
+            "early": 3,
+            "mid": 2,
+            "mid-late": 2,
             "late": 2
         }[phase]
 
@@ -256,7 +300,7 @@ class NewMachinedPlayer(Controller):
                 troops = state[fort_id][3]
                 
                 if (state[fort_id][4] == -1 and 
-                    (level < max_upgrade_level or my_soldiers > 400) and
+                    (level < max_upgrade_level or my_soldiers > 200) and
                     level < 5 and
                     troops >= self.fortress_limit[level] * 0.4):  # 40%で開始
                     priority = upgrade_priority_base + 50 + level * 10
@@ -277,7 +321,7 @@ class NewMachinedPlayer(Controller):
                 troops_threshold = self.fortress_limit[level] * (0.5 if phase == "early" else 0.5)
                 
                 if (state[my_fort][4] == -1 and 
-                    (level < max_upgrade_level or my_soldiers > 400) and
+                    (level < max_upgrade_level or my_soldiers > 200) and
                     level < 5 and
                     troops >= troops_threshold):
                     priority = upgrade_priority_base + importance + level * 10 + enemy_neighbors * 8 + 50 # とりあえずアップグレードは高めに
@@ -334,7 +378,7 @@ class NewMachinedPlayer(Controller):
                     max_troops = self.fortress_limit[level]
                     
                     # 攻撃開始の口火を切る条件: レベルMAX かつ 兵力90%以上
-                    if (phase == "early" and level == 4 and troops >= max_troops * 0.9) or (phase == "mid" and level >= 3 and troops >= max_troops * 0.9):
+                    if (phase == "early" and level == 3 and troops >= max_troops * 0.9) or (phase == "mid" and level >= 2 and troops >= max_troops * 0.9):
                         neighbors = state[my_fort][5]
                         
                         for neighbor in neighbors:
@@ -344,7 +388,7 @@ class NewMachinedPlayer(Controller):
                                 # 評価関数
                                 score = 0
                                 multiplier = 1.5
-                                if (neighbor in [3, 8] and my_fortress_num == 3):
+                                if (neighbor in [6, 8] and (my_fortress_num == 3 or my_fortress_num == 4)):
                                     # 戦略的に重要拠点は4番目にとってほしい
                                     score += 1000 # 重要拠点
                                     # 取れるならすぐに取ってほしい
@@ -457,7 +501,7 @@ class NewMachinedPlayer(Controller):
                 for neighbor in neighbors:
                     action_key = (1, my_fort, neighbor)
                     # if state[neighbor][0] == 2 and action_key not in considered_actions:
-                    if state[neighbor][0] == 2:
+                    if state[neighbor][0] == 2 or (state[neighbor][0] == 0 and phase == "late"):
                         my_troops = state[my_fort][3]
                         enemy_troops = state[neighbor][3]
                         enemy_level = state[neighbor][2]
@@ -466,7 +510,10 @@ class NewMachinedPlayer(Controller):
                         adjusted_enemy_strength = enemy_troops * defense_multiplier
                         success_ratio = my_troops / max(adjusted_enemy_strength, 1)
                         # 取られて間もない要塞なら問題なく攻撃を開始する
-                        success_threshold = 0.5 if (my_soldiers > enemy_soldiers * 10) else 3.0
+                        if (state[neighbor][0] == 2):
+                            success_threshold = 0.5 if (my_soldiers > enemy_soldiers * 3) else 3.0
+                        elif (state[neighbor][0] == 0 and phase == "late"):
+                            success_threshold = 0.5 if (my_soldiers > enemy_soldiers * 4) else 2.0
                         
                         if success_ratio >= success_threshold:  # 敵はより慎重に
                             importance = self.FORTRESS_IMPORTANCE.get(neighbor, 5)
@@ -475,68 +522,63 @@ class NewMachinedPlayer(Controller):
                             actions.append((priority, 1, my_fort, neighbor))
                             # considered_actions.add(action_key)
 
-        # === 部隊の戦略的再配置（バケツリレー改善版）===
+        # === 常時補給 (Logistics Supply) ===
+        # ターゲットや防御対象がない場合でも、常に前線に兵を送る
+        # 敵に隣接する自軍要塞を「前線」とみなす
+        front_lines = [f for f in my_fortresses if self.count_enemy_neighbors(f, state) > 0]
+        
+        # 前線要塞それぞれに対してバケツリレーを設定
+        if front_lines:
+            for fort in front_lines:
+                self.execute_bucket_brigade(fort, state, my_fortresses, actions, 
+                                          priority_base=50, 
+                                          troops_threshold=10, 
+                                          ignore_direct_neighbors=False)
+
+        # === オーバーフロー防止 (Overflow Protection) ===
+        # 前線の要塞などが満杯になった場合、隣接する味方へ兵を逃がす
         for my_fort in my_fortresses:
             level = state[my_fort][2]
             troops = state[my_fort][3]
             max_troops = self.fortress_limit[level]
-            enemy_neighbors = self.count_enemy_neighbors(my_fort, state)
             
-            # しきい値の動的設定
-            has_enemy_neighbor = enemy_neighbors > 0
-            threshold = 0.9 if has_enemy_neighbor else 0.4  # 前線は90%、後方は40%
-            
-            # 溢れ判定
-            is_overflowing = troops >= max_troops * 0.9
-            
-            # しきい値を超えている場合のみ処理
-            if troops > max_troops * threshold: 
+            # 90%以上で溢れそうなら対策発動
+            if max_troops > 0 and troops >= max_troops * 0.9:
                 neighbors = state[my_fort][5]
-                best_target = None
-                best_priority = 0
+                friendly_neighbors = [n for n in neighbors if state[n][0] == 1]
                 
-                for neighbor in neighbors:
-                    action_key = (1, my_fort, neighbor)
+                if friendly_neighbors:
+                    best_receiver = None
+                    best_score = -float('inf')
                     
-                    # 味方要塞のみが対象
-                    # if state[neighbor][0] == 1 and action_key not in considered_actions: 
-                    if state[neighbor][0] == 1:
-                        # # 序盤は中央（4,7）への移動は避ける
-                        # if phase == "early" and neighbor in [4, 7]:
-                        #     continue
+                    for receiver in friendly_neighbors:
+                        r_level = state[receiver][2]
+                        r_troops = state[receiver][3]
+                        r_max = self.fortress_limit[r_level]
                         
-                        neighbor_enemy_count = self.count_enemy_neighbors(neighbor, state)
+                        # 評価基準:
+                        # 1. 空き容量が多いこと (充填率が低い)
+                        # 2. 前線に近い、あるいは前線そのものであること
                         
-                        # その味方要塞が前線（敵の隣）にいる場合
-                        if neighbor_enemy_count > 0:
-                            # 溢れている場合は超高優先
-                            priority = 500 if is_overflowing else 60
-                            
-                            if priority > best_priority:
-                                best_priority = priority
-                                best_target = neighbor
-                                break  # 前線要塞が見つかったら即決定
-                
-                # 前線要塞が見つからなかったが、溢れている場合
-                if best_target is None and is_overflowing: 
-                    for neighbor in neighbors:
-                        action_key = (1, my_fort, neighbor)
-                        # if state[neighbor][0] == 1 and action_key not in considered_actions:
-                        if state[neighbor][0] == 1:
-                            # if phase == "early" and neighbor in [4, 7]:
-                            #     continue
-                            # とにかく溢れを防ぐための移動
-                            best_priority = 300
-                            best_target = neighbor
-                            break
-                
-                # 移動先が決まったら actions に追加
-                if best_target is not None:
-                    action_key = (1, my_fort, best_target)
-                    # 優先度に微小なランダム値を加えて、順番をばらけさせる
-                    randomized_priority = best_priority + random.uniform(0, 0.1)
-                    actions.append((best_priority, 1, my_fort, best_target))
-                    # considered_actions.add(action_key)
+                        vacancy_rate = 1.0 - (r_troops / r_max) if r_max > 0 else 0
+                        is_front = self.count_enemy_neighbors(receiver, state) > 0
+                        
+                        score = vacancy_rate * 10
+                        if is_front:
+                            score += 5 # 前線なら優先的に受け入れてもらう
+                        
+                        if score > best_score:
+                            best_score = score
+                            best_receiver = receiver
+                    
+                    if best_receiver is not None:
+                        # execute_bucket_brigadeでアクションが生成されなかった場合（行き止まりなど）
+                        # または生成されていても、こちらのほうが優先度が高くなるように設定(300+α)
+                        # バケツリレーのoverflow_bonus(300)と同等の優先度を持たせる
+                        priority = 300 + best_score
+                        actions.append((priority, 1, my_fort, best_receiver))
+                        if self.step < 500 and self.step % 10 == 0:
+                             print(f"  オーバーフロー防止: {my_fort}→{best_receiver} (score:{best_score:.1f})")
 
         # 最も優先度の高いアクションを実行
         if actions:
