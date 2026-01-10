@@ -220,7 +220,7 @@ class MachinedPlayer(Controller):
                 troops_threshold = self.fortress_limit[level] * (0.5 if phase == "early" else 0.5)
                 
                 if (state[my_fort][4] == -1 and 
-                    (level < max_upgrade_level or my_soldiers > 800) and
+                    (level < max_upgrade_level or my_soldiers > 400) and
                     level < 5 and
                     troops >= troops_threshold):
                     priority = upgrade_priority_base + importance + level * 10 + enemy_neighbors * 8 + 50 # とりあえずアップグレードは高めに
