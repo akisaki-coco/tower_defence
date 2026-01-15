@@ -1,7 +1,7 @@
 from tcg.controller import Controller
 from collections import defaultdict
 
-class Myplayer3(Controller):
+class Myplayer4(Controller):
     def __init__(self):
         super().__init__()
         self.step = 0
