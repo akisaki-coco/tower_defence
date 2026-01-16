@@ -194,7 +194,7 @@ class NewMachinedPlayer(Controller):
         my_fortress_num = len(my_fortresses)
         if my_fortress_num < 3:
             phase = "early"
-        elif my_fortress_num < 5:
+        elif my_fortress_num < 4:
             phase = "mid"
         else:
             phase = "late"
@@ -286,8 +286,8 @@ class NewMachinedPlayer(Controller):
                     priority = upgrade_priority_base + 50 + level * 10
                     actions.append((priority, 2, fort_id, 0))
                     # print("LAUNCH UPGRADE")
-                    if self.step < 500:
-                        print(f"    重要拠点アップグレード計画: 要塞{fort_id} Lv{level}→{level+1} (優先度{priority})")
+                    # if self.step < 500:
+                    #     print(f"    重要拠点アップグレード計画: 要塞{fort_id} Lv{level}→{level+1} (優先度{priority})")
 
         # その他の要塞のアップグレード
         for my_fort in my_fortresses:
@@ -316,8 +316,8 @@ class NewMachinedPlayer(Controller):
                         priority += 1000
                     actions.append((priority, 2, my_fort, 0)) 
                     # print("LAUNCH UPGRADE")
-                    if self.step < 500:
-                        print(f"    アップグレード計画: 要塞{my_fort} Lv{level}→{level+1} (優先度{priority})")
+                    # if self.step < 500:
+                    #     print(f"    アップグレード計画: 要塞{my_fort} Lv{level}→{level+1} (優先度{priority})")
         
         # # === 新規占領要塞の優先アップグレード ===
         # for fort_id in newly_captured:
@@ -371,8 +371,8 @@ class NewMachinedPlayer(Controller):
                     max_troops = self.fortress_limit[level]
                     
                     # 攻撃開始トリガー: レベルと兵力条件
-                    if (phase == "early" and level == 3 and troops >= max_troops * 0.9) or \
-                       (phase == "mid" and level >= 2 and troops >= max_troops * 0.9):
+                    if (phase == "early" and level == 3 and troops >= max_troops * 0.7) or \
+                       (phase == "mid" and level >= 2 and troops >= max_troops * 0.7):
                         
                         neighbors = state[my_fort][5]
                         for neighbor in neighbors:
@@ -384,7 +384,7 @@ class NewMachinedPlayer(Controller):
                                 # 重要拠点ボーナス
                                 if neighbor in [4, 7] and (my_fortress_num in [3, 4]):
                                     score += 1000
-                                    if my_soldiers > 100: multiplier = 1.0
+                                    if my_soldiers > 100: multiplier = 0.8
                                 
                                 score -= neutral_troops
                                 
