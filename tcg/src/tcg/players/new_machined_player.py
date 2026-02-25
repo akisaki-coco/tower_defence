@@ -371,8 +371,8 @@ class NewMachinedPlayer(Controller):
                     max_troops = self.fortress_limit[level]
                     
                     # 攻撃開始トリガー: レベルと兵力条件
-                    if (phase == "early" and level == 3 and troops >= max_troops * 0.7) or \
-                       (phase == "mid" and level >= 2 and troops >= max_troops * 0.7):
+                    if (phase == "early" and level == 3 and troops >= max_troops * 0.6) or \
+                       (phase == "mid" and level >= 2 and troops >= max_troops * 0.6):
                         
                         neighbors = state[my_fort][5]
                         for neighbor in neighbors:
